@@ -1,25 +1,23 @@
-# Private portfolio (encrypted, GitHub Pages)
+# Private portfolio (Vercel)
 
-A single-page React app. All personal content is AES-256-GCM encrypted into `public/vault.json`.
-Visitors type a password and the page decrypts in their browser. Nothing readable is in the repo or the bundle.
+A single-page React app that visitors can open only with a one-time QR invite. It also has an owner-only admin panel.
 
-## Update content or change the password
+- **Visitors** scan a QR code, which opens `/#/invite/<code>`, then click **Open portfolio**. The first device gets access for the time you chose. Anyone who reuses the link is blocked and logged.
+- **Owner** goes to `/#/admin` and signs in with the owner password to manage invites, visitor insights (IP address, approximate location, device, pages viewed, downloads) and settings (turn the resume download on or off, upload a new PDF).
 
-1. Edit `private/content.json` (and `private/resume.pdf`). This folder is gitignored and stays on your machine.
-2. `npm run encrypt` asks for the password (12+ characters) and rewrites `public/vault.json`.
-3. Commit and push `public/vault.json`. GitHub Actions builds and deploys to Pages.
+## How it's built
 
-Keep a backup of `private/`. Without it you would have to rebuild the content from scratch.
+- `api/index.js` is a single Vercel function that handles all `/api/*` routes. It stores invites, the visit log and settings in Upstash Redis (free plan).
+- Content and the resume are AES-256-GCM encrypted at rest with `CONTENT_KEY`. Sessions are signed HttpOnly cookies (`SESSION_SECRET`).
+- Plaintext content stays in `private/`, which is gitignored and never committed.
 
-## Local dev
+## Maintenance
 
 ```bash
-npm install
-npm run dev
+npm run owner-password     # change the owner password (stores only a scrypt hash)
+npx vercel env pull .env.local
+npm run seed               # upload private/content.json after editing it
+npm run seed -- --resume   # also replace the resume with private/resume.pdf
 ```
 
-## Security notes
-
-- The key comes from the password via PBKDF2-SHA256 with 600k iterations. A long, random password is the only protection, because anyone can download the vault and try to guess it offline.
-- To revoke access, re-encrypt with a new password and push. People who saved the old vault can still open that old copy.
-- "Keep unlocked in this tab" keeps the derived key in `sessionStorage` until the tab closes.
+A push to `main` redeploys automatically. `npm run ship` deploys from your machine.
