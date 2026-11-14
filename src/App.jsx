@@ -26,7 +26,7 @@ function InviteLanding({ code, onIn }) {
   const [err, setErr] = useState("");
   const go = async () => {
     setBusy(true); setErr("");
-    try { await api.redeem(code); history.replaceState(null, "", "#/home"); onIn(); }
+    try { await api.redeem(code); await onIn(); }
     catch (e) { setErr(e.message); }
     finally { setBusy(false); }
   };
@@ -399,7 +399,10 @@ export default function App() {
   useEffect(() => { load(); const on = () => setHash(window.location.hash); window.addEventListener("hashchange", on); return () => window.removeEventListener("hashchange", on); }, []);
 
   const [page, code] = hash.replace(/^#\/?/, "").split("/");
-  if (page === "invite" && code) return <InviteLanding code={code} onIn={load} />;
+  // After a successful redeem: drop the invite code from the address and show the portfolio.
+  const enter = async () => { history.replaceState(null, "", "#/home"); setHash("#/home"); await load(); };
+  if (page === "invite" && code && state.status !== "in") return <InviteLanding code={code} onIn={enter} />;
+  if (page === "invite" && state.status === "in") { history.replaceState(null, "", "#/home"); }
   if (state.status === "loading") return <div className="boot" />;
   if (state.status === "error") return <Shell><h1>Something went wrong</h1><p className="muted">{state.error}</p></Shell>;
   if (state.status === "out") return page === "admin" ? <OwnerLogin onIn={load} /> : <Gate />;
