@@ -1,0 +1,6 @@
+node_modules
+dist
+# Plaintext content never leaves this machine — only public/vault.json (encrypted) is committed.
+private/
+.env*
+.claude/
