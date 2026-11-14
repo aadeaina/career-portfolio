@@ -4,3 +4,4 @@ dist
 private/
 .env*
 .claude/
+.vercel

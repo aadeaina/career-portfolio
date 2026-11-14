@@ -1,46 +1,87 @@
 import { useEffect, useState } from "react";
-import { unlock, resume, lock } from "./vault.js";
+import { api, downloadResume } from "./api.js";
 import Figure from "./components/Figure.jsx";
 import Animation from "./components/Animations.jsx";
 import Carousel from "./components/Carousel.jsx";
+import Admin from "./components/Admin.jsx";
 
-function LockScreen({ onUnlock }) {
-  const [pw, setPw] = useState("");
-  const [remember, setRemember] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
-  const submit = async (e) => {
-    e.preventDefault();
-    if (!pw) return;
-    setBusy(true); setErr("");
-    try { onUnlock(await unlock(pw, remember)); }
-    catch (e2) { setErr(e2.message === "Vault not found" ? "Content is not published yet." : "That password didn't work."); setPw(""); }
-    finally { setBusy(false); }
-  };
+function Shell({ children }) {
   return (
     <main className="lock">
       <div className="orb o1" /><div className="orb o2" /><div className="orb o3" />
-      <form className="glass lock-card" onSubmit={submit}>
+      <div className="glass lock-card">
         <div className="lock-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="2"><rect x="4" y="11" width="16" height="10" rx="2.5" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></svg>
         </div>
-        <h1>Private portfolio</h1>
-        <p className="muted">This page is encrypted end to end. Enter the password you were given to decrypt it in your browser.</p>
-        <Animation scene="encryption" height={190} className="lock-anim" />
-        <label className="field">
-          <span>Password</span>
-          <input type="password" autoFocus autoComplete="current-password" value={pw} onChange={(e) => setPw(e.target.value)} aria-invalid={!!err} />
-        </label>
-        <label className="check"><input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /> Keep unlocked in this tab</label>
-        {err && <div className="err" role="alert">{err}</div>}
-        <button className="btn primary" disabled={busy || !pw}>{busy ? "Decrypting…" : "Unlock"}</button>
-        <p className="fine">AES-256-GCM · PBKDF2-SHA256 · nothing is sent to a server</p>
-      </form>
+        {children}
+      </div>
     </main>
   );
 }
 
-/* ---------- routing: #/page or #/page/sub (works on GitHub Pages without a 404 trick) ---------- */
+// Landing for a one-time QR link. Redeeming needs a click, so link-preview bots
+// (Slack, iMessage, email scanners) can't burn the invite by fetching the URL.
+function InviteLanding({ code, onIn }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const go = async () => {
+    setBusy(true); setErr("");
+    try { await api.redeem(code); history.replaceState(null, "", "#/home"); onIn(); }
+    catch (e) { setErr(e.message); }
+    finally { setBusy(false); }
+  };
+  return (
+    <Shell>
+      <h1>You're invited</h1>
+      <p className="muted">This is a private, one-time link to a professional portfolio. Opening it binds access to this device.</p>
+      <Animation scene="handshake" height={170} className="lock-anim" />
+      {err && <div className="err" role="alert">{err}</div>}
+      <button className="btn primary" onClick={go} disabled={busy || !!err}>{busy ? "Opening…" : "Open portfolio"}</button>
+      <p className="fine">This private link records access details (IP address, approximate location and device) for security.</p>
+    </Shell>
+  );
+}
+
+function Gate() {
+  return (
+    <Shell>
+      <h1>Private portfolio</h1>
+      <p className="muted">This portfolio is shared by personal invitation only. Scan the QR code or open the link you were given.</p>
+      <Animation scene="encryption" height={190} className="lock-anim" />
+      <p className="fine">Already used your link on another device? Ask for a new one. · <a href="#/admin">Owner sign-in</a></p>
+    </Shell>
+  );
+}
+
+function OwnerLogin({ onIn }) {
+  const [pw, setPw] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const submit = async (e) => {
+    e.preventDefault();
+    setBusy(true); setErr("");
+    try { await api.login(pw); onIn(); }
+    catch (e2) { setErr(e2.message); setPw(""); }
+    finally { setBusy(false); }
+  };
+  return (
+    <Shell>
+      <form onSubmit={submit} className="stack-form">
+        <h1>Owner sign-in</h1>
+        <p className="muted">Maintenance access: invites, visitor insights and settings.</p>
+        <label className="field">
+          <span>Owner password</span>
+          <input type="password" autoFocus autoComplete="current-password" value={pw} onChange={(e) => setPw(e.target.value)} aria-invalid={!!err} />
+        </label>
+        {err && <div className="err" role="alert">{err}</div>}
+        <button className="btn primary" disabled={busy || !pw}>{busy ? "Signing in…" : "Sign in"}</button>
+        <p className="fine"><a href="#/home">← Back</a></p>
+      </form>
+    </Shell>
+  );
+}
+
+/* ---------- routing: #/page or #/page/sub ---------- */
 const PAGES = [
   { id: "home", label: "Home", blurb: "The case in one screen." },
   { id: "journey", label: "Journey", blurb: "2012 → today, one chapter at a time." },
@@ -49,9 +90,10 @@ const PAGES = [
   { id: "stack", label: "Stack", blurb: "Every layer from silicon to AI, and the full toolkit." },
   { id: "resume", label: "Resume", blurb: "Full experience, skills and a PDF download." },
 ];
+const ADMIN_PAGE = { id: "admin", label: "Admin", blurb: "" };
 const parseHash = () => {
   const [page, sub] = window.location.hash.replace(/^#\/?/, "").split("/");
-  return { page: PAGES.some((p) => p.id === page) ? page : "home", sub: sub || null };
+  return { page: PAGES.some((p) => p.id === page) || page === "admin" ? page : "home", sub: sub || null, raw: page };
 };
 function useRoute() {
   const [route, setRoute] = useState(parseHash);
@@ -64,12 +106,13 @@ function useRoute() {
 }
 const href = (page, sub) => `#/${page}${sub ? `/${sub}` : ""}`;
 
-function Nav({ name, onLock, page }) {
+function Nav({ name, onLock, page, owner }) {
+  const items = owner ? [...PAGES, ADMIN_PAGE] : PAGES;
   return (
     <header className="nav glass">
       <a href={href("home")} className="brand">{name.replace(/[“”"]/g, "").split(" ").filter((_, i, a) => i === 0 || i === a.length - 1).join(" ")}</a>
-      <nav>{PAGES.map((p) => <a key={p.id} href={href(p.id)} className={page === p.id ? "on" : ""} aria-current={page === p.id ? "page" : undefined}>{p.label}</a>)}</nav>
-      <button className="btn ghost sm" onClick={onLock}>Lock</button>
+      <nav>{items.map((p) => <a key={p.id} href={href(p.id)} className={`${page === p.id ? "on" : ""} ${p.id === "admin" ? "admin-link" : ""}`} aria-current={page === p.id ? "page" : undefined}>{p.label}</a>)}</nav>
+      <button className="btn ghost sm" onClick={onLock}>Sign out</button>
     </header>
   );
 }
@@ -86,12 +129,17 @@ function Reveal({ children, as: Tag = "div", className = "", ...rest }) {
   return <Tag ref={setRef} className={`reveal ${shown ? "in" : ""} ${className}`} {...rest}>{children}</Tag>;
 }
 
-function downloadPdf(b64, name) {
-  const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-  const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
-  const a = Object.assign(document.createElement("a"), { href: url, download: name });
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 2000);
+function ResumeButton({ settings, owner, label = "Download resume" }) {
+  const [err, setErr] = useState("");
+  if (!settings.resumeDownload && !owner) return null;
+  return (
+    <>
+      <button className="btn primary" onClick={() => downloadResume().catch((e) => setErr(e.message))}>
+        {label}{!settings.resumeDownload && owner ? " (hidden from visitors)" : ""}
+      </button>
+      {err && <span className="err">{err}</span>}
+    </>
+  );
 }
 
 function PageHead({ kicker, title, lede }) {
@@ -128,7 +176,7 @@ function Home({ c, data }) {
           <p className="lede">{p.tagline}</p>
           <p className="muted">{p.role} · {p.location}</p>
           <div className="actions">
-            {data.resumePdf && <button className="btn primary" onClick={() => downloadPdf(data.resumePdf, "resume.pdf")}>Download resume</button>}
+            <ResumeButton settings={data.settings} owner={data.role === "owner"} />
             <a className="btn ghost" href={href("journey")}>Start the journey →</a>
           </div>
         </div>
@@ -285,7 +333,7 @@ function Resume({ c, data }) {
     <>
       <Reveal className="resume-head page-head">
         <div><div className="kicker">Resume</div><h1 className="page-title">{p.title}</h1></div>
-        {data.resumePdf && <button className="btn primary" onClick={() => downloadPdf(data.resumePdf, "resume.pdf")}>Download PDF</button>}
+        <ResumeButton settings={data.settings} owner={data.role === "owner"} label="Download PDF" />
       </Reveal>
       <Reveal className="glass resume-summary"><p>{p.summary}</p></Reveal>
       <div className="resume-grid">
@@ -316,34 +364,50 @@ function Resume({ c, data }) {
   );
 }
 
-const VIEWS = { home: Home, journey: Journey, media: Media, patterns: Patterns, stack: Stack, resume: Resume };
+const VIEWS = { home: Home, journey: Journey, media: Media, patterns: Patterns, stack: Stack, resume: Resume, admin: Admin };
 
-function Portfolio({ data, onLock }) {
+function Portfolio({ data, onSignOut, onSettings }) {
   const c = data.content;
-  const { page, sub } = useRoute();
+  const owner = data.role === "owner";
+  const { page: rawPage, sub } = useRoute();
+  const page = rawPage === "admin" && !owner ? "home" : rawPage;
   const View = VIEWS[page];
   useEffect(() => {
-    const label = PAGES.find((p) => p.id === page)?.label;
+    const label = page === "admin" ? "Admin" : PAGES.find((p) => p.id === page)?.label;
     document.title = page === "home" ? "Private Portfolio" : `${label} · Private Portfolio`;
-  }, [page]);
+    if (!owner) api.track(sub ? `${page}/${sub}` : page);
+  }, [page, sub, owner]);
   return (
     <>
       <div className="bg" aria-hidden="true"><div className="orb o1" /><div className="orb o2" /><div className="orb o3" /></div>
-      <Nav name={c.profile.name} onLock={onLock} page={page} />
+      <Nav name={c.profile.name} onLock={onSignOut} page={page} owner={owner} />
       <main key={page} className="page">
-        <View c={c} data={data} sub={sub} />
-        <PageFooter page={page} />
+        <View c={c} data={data} sub={sub} onSettings={onSettings} />
+        {page !== "admin" && <PageFooter page={page} />}
       </main>
-      <footer className="foot">Decrypted locally in your browser · <button className="linkish" onClick={onLock}>Lock page</button></footer>
+      <footer className="foot">{owner ? "Signed in as owner" : "Private invitation"} · <button className="linkish" onClick={onSignOut}>Sign out</button></footer>
     </>
   );
 }
 
 export default function App() {
-  const [data, setData] = useState(null);
-  const [checking, setChecking] = useState(true);
-  useEffect(() => { resume().then((d) => { if (d) setData(d); setChecking(false); }); }, []);
-  if (checking) return <div className="boot" />;
-  if (!data) return <LockScreen onUnlock={setData} />;
-  return <Portfolio data={data} onLock={() => { lock(); setData(null); window.scrollTo(0, 0); }} />;
+  const [state, setState] = useState({ status: "loading" });
+  const [hash, setHash] = useState(window.location.hash);
+  const load = () => api.content()
+    .then((d) => setState({ status: "in", data: d }))
+    .catch((e) => setState({ status: e.status === 401 ? "out" : "error", error: e.message }));
+  useEffect(() => { load(); const on = () => setHash(window.location.hash); window.addEventListener("hashchange", on); return () => window.removeEventListener("hashchange", on); }, []);
+
+  const [page, code] = hash.replace(/^#\/?/, "").split("/");
+  if (page === "invite" && code) return <InviteLanding code={code} onIn={load} />;
+  if (state.status === "loading") return <div className="boot" />;
+  if (state.status === "error") return <Shell><h1>Something went wrong</h1><p className="muted">{state.error}</p></Shell>;
+  if (state.status === "out") return page === "admin" ? <OwnerLogin onIn={load} /> : <Gate />;
+  return (
+    <Portfolio
+      data={state.data}
+      onSettings={(settings) => setState((s) => ({ ...s, data: { ...s.data, settings } }))}
+      onSignOut={async () => { await api.logout().catch(() => {}); history.replaceState(null, "", "#/home"); setState({ status: "out" }); setHash("#/home"); }}
+    />
+  );
 }
